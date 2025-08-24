@@ -89,14 +89,13 @@ class Api:
             'sec-fetch-dest' : 'empty',
             'sec-fetch-mode' : 'cors',
             'sec-fetch-site' : 'same-origin',
-            'cookie'         : this.cookies,
+            'cookie'         : '; '.join(f'{k}={v}' for k, v in this.cookies.items()),
             'user-agent'     : this.userAgent
         }
     
-    def user_videos(this, secUid: str, count: int = 1, cursor: int = 0) -> response:
+    def user_videos(this, secUid: str, count: int = 1, cursor: str = "0") -> response:
         params = this.get_params({
             'secUid': secUid,
-            # 'userId': userId,
             'count' : count,
             'cursor': cursor 
         })
@@ -105,10 +104,23 @@ class Api:
     
     def user_info(this, uniqueId: str) -> response:
         params = this.get_params({
-            'uniqueId': uniqueId
+            'uniqueId': uniqueId,
+            'lang': 'en',
+            'from_page': 'user',
+            'appId': '1233'
         })
-
-        return this.client.get(f'https://www.tiktok.com/api/user/detail/?{this.sign(params, this.userAgent)}', headers = this.get_headers(), cookies = this.cookies)
+        
+        url = f'https://www.tiktok.com/api/user/detail/?{this.sign(params, this.userAgent)}'
+        print(f"\nDebug - Request URL: {url}")
+        print("Debug - Headers:", this.get_headers())
+        print("Debug - Cookies:", this.cookies)
+        
+        response = this.client.get(url, headers=this.get_headers(), cookies=this.cookies)
+        print(f"\nDebug - Response Status: {response.status_code}")
+        print(f"Debug - Response Headers: {dict(response.headers)}")
+        print(f"Debug - Response Text: {response.text[:500]}...")  # First 500 chars
+        
+        return response
     
     def username_check(this, username: str) -> response: # NEEDS SESSIONID
         params = this.get_params({

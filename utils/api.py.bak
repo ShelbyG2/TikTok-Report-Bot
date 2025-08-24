@@ -1,0 +1,167 @@
+from base64 import b64decode, b64encode
+from Crypto.Cipher import AES
+from json import loads, JSONDecodeError
+from urllib.parse import quote, urlencode
+from random import randint
+from tls_client import Session
+from execjs import compile
+from typing import Any, Optional, Dict, Union
+from time import sleep
+
+class Api:
+    def __init__(self, userAgent: str = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36', cookies: dict = {}):
+        self.cookies = cookies
+        self.userAgent = userAgent
+        self.client = Session(client_identifier='chrome_109')
+        self.signer = compile(bytes.fromhex(open('./utils/jsvmp.hex').read()[::-1]).decode())
+        self.debug = True  # Enable debug output
+
+    def debug_log(self, msg: str) -> None:
+        """Print debug messages if debug mode is enabled"""
+        if self.debug:
+            print(f"[DEBUG] {msg}")
+
+    def safe_json(self, response: Any) -> Dict:
+        """Safely parse JSON response with debug logging"""
+        try:
+            if not response.text:
+                self.debug_log("Empty response received")
+                return {}
+            
+            self.debug_log(f"Response Status: {response.status_code}")
+            self.debug_log(f"Response Headers: {dict(response.headers)}")
+            self.debug_log(f"Response Text: {response.text[:500]}...")
+            
+            return response.json()
+        except JSONDecodeError as e:
+            self.debug_log(f"JSON Parse Error: {str(e)}")
+            self.debug_log(f"Raw Response: {response.text}")
+            return {}
+
+    @staticmethod
+    def x_tt_decrypt(enc: Union[bytes, str], key: bytes = b"webapp1.0+202106") -> str:
+        """Decrypt TikTok encrypted data"""
+        if isinstance(enc, str):
+            enc = enc.encode('utf-8')
+        return AES.new(key, AES.MODE_CBC, key).decrypt(b64decode(enc)).strip().decode("utf-8")
+
+    @staticmethod
+    def x_tt_encrypt(text: str, key: bytes = b"webapp1.0+202106") -> str:
+        """Encrypt data for TikTok"""
+        data = f"{text}&is_encryption=1".encode("utf-8")
+        padded = data + bytes([16 - (len(data) % 16)]) * (16 - (len(data) % 16))
+        encrypted = AES.new(key, AES.MODE_CBC, key).encrypt(padded)
+        return b64encode(encrypted).decode("utf-8")
+
+    def sign(self, params: str, ua: str) -> str:
+        """Sign the request parameters"""
+        return params + '&X-Bogus=' + self.signer.call('sign', params, ua)
+
+    def get_params(self, extra: dict = {}, device_id: int = randint(7000000000000000000, 7999999999999999999)) -> str:
+        """Get request parameters with defaults"""
+        params = {
+            'aid': 1988,
+            'app_language': 'en',
+            'app_name': 'tiktok_web',
+            'battery_info': 1,
+            'browser_language': 'en',
+            'browser_name': 'Mozilla',
+            'browser_online': 'true',
+            'browser_platform': 'Win32',
+            'browser_version': self.userAgent,
+            'channel': 'tiktok_web',
+            'cookie_enabled': 'true',
+            'device_id': device_id,
+            'device_platform': 'web_pc',
+            'focus_state': 'true',
+            'from_page': 'user',
+            'history_len': '3',
+            'is_fullscreen': 'false',
+            'is_page_visible': 'true',
+            'os': 'windows',
+            'priority_region': 'FR',
+            'referer': '',
+            'region': 'FR',
+            'screen_height': '1080',
+            'screen_width': '1920',
+            'tz_name': 'Africa/Casablanca',
+            'webcast_language': 'en',
+        }
+        params.update(extra)
+        return urlencode(params)
+
+    def get_headers(self, extra: dict = {}) -> Dict[str, str]:
+        """Generate request headers"""
+        headers = {
+            'authority': 'www.tiktok.com',
+            'accept': '*/*',
+            'accept-language': 'en,fr-FR;q=0.9,fr;q=0.8,es-ES;q=0.7,es;q=0.6,en-US;q=0.5,am;q=0.4,de;q=0.3',
+            'referer': 'https://www.tiktok.com/',
+            'sec-ch-ua': '"Not_A Brand";v="99", "Google Chrome";v="109", "Chromium";v="109"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-origin',
+            'cookie': '; '.join(f'{k}={v}' for k, v in self.cookies.items()),
+            'user-agent': self.userAgent
+        }
+        headers.update(extra)
+        return headers
+
+    def make_request(self, url: str, method: str = 'GET', params: Optional[Dict] = None, retries: int = 3) -> Dict:
+        """Make an API request with retries and error handling"""
+        for attempt in range(retries):
+            try:
+                if method == 'GET':
+                    response = self.client.get(url, headers=self.get_headers(), cookies=self.cookies)
+                else:
+                    response = self.client.post(url, headers=self.get_headers(), cookies=self.cookies, data=params)
+                
+                return self.safe_json(response)
+            except Exception as e:
+                self.debug_log(f"Request failed (attempt {attempt + 1}/{retries}): {str(e)}")
+                if attempt < retries - 1:
+                    sleep(1 * (attempt + 1))  # Exponential backoff
+        return {}
+
+    def user_videos(self, secUid: str, count: int = 1, cursor: str = "0") -> Dict:
+        """Get user videos with cursor pagination"""
+        params = self.get_params({
+            'secUid': secUid,
+            'count': count,
+            'cursor': cursor
+        })
+        
+        url = f'https://www.tiktok.com/api/post/item_list/?{self.sign(params, self.userAgent)}'
+        return self.make_request(url)
+
+    def user_info(self, uniqueId: str) -> Dict:
+        """Get user information by username"""
+        params = self.get_params({
+            'aid': 1988,
+            'uniqueId': uniqueId,
+            'msToken': '',
+        })
+        
+        url = f'https://www.tiktok.com/api/user/detail/?{self.sign(params, self.userAgent)}'
+        return self.make_request(url)
+
+    def account_info(self) -> Dict:
+        """Get current account information"""
+        return self.make_request('https://www.tiktok.com/passport/web/account/info/')
+
+    def tiktok_request(self, endpoint: str, extra_params: dict = {}) -> Dict:
+        """Make a generic TikTok API request"""
+        params = self.get_params(extra_params)
+        url = f'https://www.tiktok.com/api/{endpoint}?{self.sign(params, self.userAgent)}'
+        return self.make_request(url)
+
+    def check_rate_limit(self, response: Dict) -> bool:
+        """Check if we're being rate limited"""
+        if not response:
+            return True
+        if response.get('status_code') == 429:
+            self.debug_log("Rate limited detected")
+            return True
+        return False
