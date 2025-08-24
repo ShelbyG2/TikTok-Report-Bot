@@ -1,0 +1,7 @@
+browser-cookie3
+questionary
+rich
+pycryptodome
+tls-client
+typing-extensions
+PyExecJS
